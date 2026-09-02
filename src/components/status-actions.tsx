@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { changeOrderStatus, getOrderReceipt } from "@/lib/karisma/api";
+import { changeOrderStatus, deleteOrder, getOrderReceipt } from "@/lib/karisma/api";
 import { nextStatuses, transitionNotice } from "@/lib/karisma/status";
 import { PAYMENT_METHODS, PAYMENT_LABEL, RECEIPT_MAX_BYTES, paymentLabel } from "@/lib/karisma/pickup";
 import { STATUS_LABEL, type Order, type OrderStatus, type Role } from "@/lib/karisma/types";
 import { Button } from "@/components/ui/button";
+import { ConfirmDeleteButton } from "@/components/confirm-delete";
 import { StatusBadge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -49,6 +50,20 @@ export function StatusActions({ order }: { order: Order }) {
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Não foi possível atualizar.");
     },
+  });
+
+  const del = useMutation({
+    mutationFn: () => deleteOrder({ data: { orderId: order.id } }),
+    onSuccess: async () => {
+      toast.success(`Pedido nº ${order.id} excluído.`);
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["orders"] }),
+        qc.invalidateQueries({ queryKey: ["dashboard"] }),
+        qc.invalidateQueries({ queryKey: ["materials"] }),
+        qc.invalidateQueries({ queryKey: ["report"] }),
+      ]);
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Não foi possível excluir."),
   });
 
   function ask(to: OrderStatus) {
@@ -136,6 +151,16 @@ export function StatusActions({ order }: { order: Order }) {
         </div>
       ) : null}
       {order.status === "retirado" ? <PickupSummary order={order} /> : null}
+      {role === "admin" && order.status === "recebido" && !pickupOpen && !notice ? (
+        <ConfirmDeleteButton
+          label="Cancelar pedido"
+          confirmTitle={`Excluir o pedido nº ${order.id}?`}
+          confirmBody="Só dá pra cancelar pedido ainda 'Recebido'. Se algo já foi tirado do estoque, o material volta automaticamente."
+          confirmLabel="Confirmar exclusão"
+          pending={del.isPending}
+          onConfirm={() => del.mutate()}
+        />
+      ) : null}
       {pickupOpen ? (
         <PickupForm
           order={order}

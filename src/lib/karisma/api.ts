@@ -8,6 +8,7 @@ import {
   deactivationError,
   decideActivation,
   redactOrderForRole,
+  removalError,
 } from "./access";
 import { todayISO } from "./format";
 import {
@@ -27,14 +28,19 @@ import {
   cepSchema,
   customerSchema,
   customerUpdateSchema,
+  customerIdSchema,
   inviteSchema,
   materialCreateSchema,
   materialUpdateSchema,
+  materialIdSchema,
   orderSchema,
   orderIdSchema,
   catalogPieceSchema,
   catalogPrintSchema,
+  catalogPieceIdSchema,
+  catalogPrintIdSchema,
   staffActiveSchema,
+  staffIdSchema,
   statusChangeSchema,
   orderArtworkSchema,
 } from "./schemas";
@@ -491,6 +497,30 @@ export const updateCustomer = createServerFn({ method: "POST" })
     return mapCustomer(rows[0]);
   });
 
+export const deleteCustomer = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: unknown) => customerIdSchema.parse(input))
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    const staff = await requireStaff(sql, context.userId, "clientes");
+    if (staff.role !== "admin") {
+      throw new ForbiddenError("Só a administração pode excluir cadastro de cliente.");
+    }
+    const orders = await sql<{ n: number }>`
+      select count(*)::int as n from orders where customer_id = ${data.id}
+    `;
+    if (num(orders[0]?.n) > 0) {
+      throw new Error(
+        "Este cliente tem pedido lançado no histórico e não pode ser excluído.",
+      );
+    }
+    const deleted = await sql<{ id: number }>`
+      delete from customers where id = ${data.id} returning id
+    `;
+    if (!deleted[0]) throw new Error("Cliente não encontrado.");
+    return { ok: true };
+  });
+
 export const listMaterials = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
@@ -873,6 +903,42 @@ export const changeOrderStatus = createServerFn({ method: "POST" })
     };
   });
 
+export const deleteOrder = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: unknown) => orderIdSchema.parse(input))
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    const staff = await requireStaff(sql, context.userId, "pedidos");
+    if (staff.role !== "admin") {
+      throw new ForbiddenError("Só a administração pode excluir pedidos.");
+    }
+    const rows = await sql<{ id: number; stock_deducted: boolean }>`
+      select id, stock_deducted from orders where id = ${data.orderId}
+    `;
+    const current = rows[0];
+    if (!current) throw new Error("Pedido não encontrado.");
+
+    if (current.stock_deducted) {
+      const itemRows = await sql<{ material_id: number; quantity: number }>`
+        select material_id, quantity from order_items where order_id = ${data.orderId}
+      `;
+      for (const it of itemRows) {
+        await sql`
+          update materials
+          set quantity = quantity + ${it.quantity}, updated_at = now()
+          where id = ${it.material_id}
+        `;
+        await sql`
+          insert into stock_movements (material_id, order_id, delta, reason, user_id)
+          values (${it.material_id}, null, ${it.quantity}, 'Devolução por exclusão do pedido', ${context.userId})
+        `;
+      }
+    }
+
+    await sql`delete from orders where id = ${data.orderId}`;
+    return { ok: true };
+  });
+
 export const getOrderReceipt = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((input: unknown) => orderIdSchema.parse(input))
@@ -1057,6 +1123,35 @@ export const saveCatalogPrint = createServerFn({ method: "POST" })
       `;
     }
     return { ok: true, id };
+  });
+
+export const deleteCatalogPiece = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: unknown) => catalogPieceIdSchema.parse(input))
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    await requireStaff(sql, context.userId, "catalogo");
+    const deleted = await sql<{ id: number }>`
+      delete from catalog_pieces where id = ${data.id} returning id
+    `;
+    if (!deleted[0]) throw new Error("Peça não encontrada.");
+    return { ok: true };
+  });
+
+export const deleteCatalogPrint = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: unknown) => catalogPrintIdSchema.parse(input))
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    await requireStaff(sql, context.userId, "catalogo");
+    if (data.id === "sem-estampa") {
+      throw new Error("Esta é a estampa fixa \"sem estampa\" e não pode ser excluída.");
+    }
+    const deleted = await sql<{ id: string }>`
+      delete from catalog_prints where id = ${data.id} returning id
+    `;
+    if (!deleted[0]) throw new Error("Estampa não encontrada.");
+    return { ok: true };
   });
 
 async function loadOutlook(
@@ -1338,6 +1433,34 @@ export const setStaffActive = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+export const removeStaff = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: unknown) => staffIdSchema.parse(input))
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    const me = await requireStaff(sql, context.userId, "equipe");
+    if (me.role !== "admin") {
+      throw new ForbiddenError("Só a administração pode remover pessoas da equipe.");
+    }
+    const target = await sql<StaffRow>`
+      select id, user_id, email, name, role, active from staff where id = ${data.id}
+    `;
+    if (!target[0]) throw new Error("Pessoa não encontrada na equipe.");
+    const admins = await sql<{ n: number }>`
+      select count(*)::int as n from staff where role = 'admin' and active = true
+    `;
+    const err = removalError({
+      actorId: me.id,
+      targetId: num(target[0].id),
+      targetRole: target[0].role,
+      targetActive: Boolean(target[0].active),
+      activeAdminCount: num(admins[0]?.n),
+    });
+    if (err) throw new Error(err);
+    await sql`delete from staff where id = ${data.id}`;
+    return { ok: true };
+  });
+
 export const createMaterial = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((input: unknown) => materialCreateSchema.parse(input))
@@ -1387,6 +1510,33 @@ export const updateMaterial = createServerFn({ method: "POST" })
       `;
     }
     return mapMaterial(updated[0]);
+  });
+
+export const deleteMaterial = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: unknown) => materialIdSchema.parse(input))
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    const staff = await requireStaff(sql, context.userId, "estoque");
+    if (staff.role !== "admin") {
+      throw new ForbiddenError("Só a administração pode excluir material.");
+    }
+    const usedInOrders = await sql<{ n: number }>`
+      select count(*)::int as n from order_items where material_id = ${data.id}
+      union all
+      select count(*)::int as n from orders where material_id = ${data.id}
+    `;
+    if (usedInOrders.some((r) => num(r.n) > 0)) {
+      throw new Error(
+        "Este material foi usado em algum pedido e não pode ser excluído. Desative-o em vez disso.",
+      );
+    }
+    await sql`delete from stock_movements where material_id = ${data.id}`;
+    const deleted = await sql<{ id: number }>`
+      delete from materials where id = ${data.id} returning id
+    `;
+    if (!deleted[0]) throw new Error("Material não encontrado.");
+    return { ok: true };
   });
 
 export const listMovements = createServerFn({ method: "GET" })

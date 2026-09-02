@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   createCustomer,
+  deleteCustomer,
   listCustomers,
   lookupCep,
   updateCustomer,
@@ -14,6 +15,7 @@ import type { Customer } from "@/lib/karisma/types";
 import { Page } from "@/components/page";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { ConfirmDeleteButton } from "@/components/confirm-delete";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -36,7 +38,7 @@ const empty = {
 };
 
 function Clientes() {
-  const { allowed } = usePageAccess("clientes");
+  const { staff, allowed } = usePageAccess("clientes");
   const qc = useQueryClient();
   const list = useQuery({
     queryKey: ["customers"],
@@ -46,6 +48,16 @@ function Clientes() {
   const [form, setForm] = useState(empty);
   const [editing, setEditing] = useState<number | null>(null);
   const [q, setQ] = useState("");
+
+  const remove = useMutation({
+    mutationFn: (id: number) => deleteCustomer({ data: { id } }),
+    onSuccess: async () => {
+      toast.success("Cliente excluído.");
+      await qc.invalidateQueries({ queryKey: ["customers"] });
+    },
+    onError: (err) =>
+      toast.error(err instanceof Error ? err.message : "Não foi possível excluir."),
+  });
 
   const save = useMutation({
     mutationFn: async () => {
@@ -251,7 +263,7 @@ function Clientes() {
               <li className="p-4 text-sm text-muted">Nenhum cliente encontrado.</li>
             ) : (
               filtered.map((c) => (
-                <li key={c.id} className="flex items-start justify-between gap-3 p-4">
+                <li key={c.id} className="flex flex-wrap items-start justify-between gap-3 p-4">
                   <div>
                     <p className="font-medium">{c.name}</p>
                     <p className="text-sm text-muted">
@@ -259,9 +271,19 @@ function Clientes() {
                       {c.city ? ` · ${c.city}/${c.state}` : ""}
                     </p>
                   </div>
-                  <Button type="button" size="sm" variant="outline" onClick={() => startEdit(c)}>
-                    Editar
-                  </Button>
+                  <div className="flex flex-wrap items-start gap-2">
+                    <Button type="button" size="sm" variant="outline" onClick={() => startEdit(c)}>
+                      Editar
+                    </Button>
+                    {staff?.role === "admin" ? (
+                      <ConfirmDeleteButton
+                        confirmTitle={`Excluir ${c.name}?`}
+                        confirmBody="Só funciona se este cliente nunca teve pedido lançado. Não tem como desfazer."
+                        pending={remove.isPending}
+                        onConfirm={() => remove.mutate(c.id)}
+                      />
+                    ) : null}
+                  </div>
                 </li>
               ))
             )}

@@ -26,6 +26,10 @@ export const customerUpdateSchema = customerSchema.extend({
   id: z.number().int().positive(),
 });
 
+export const customerIdSchema = z.object({
+  id: z.number().int().positive(),
+});
+
 export const orderItemSchema = z
   .object({
     piece: z.string().trim().min(2).max(80),
@@ -108,6 +112,10 @@ export const staffActiveSchema = z.object({
   active: z.boolean(),
 });
 
+export const staffIdSchema = z.object({
+  id: z.number().int().positive(),
+});
+
 export const activateEmailSchema = z.object({
   email: z.string().trim().email("E-mail inválido").max(160),
 });
@@ -132,6 +140,10 @@ export const materialCreateSchema = z.object({
 
 export const orderIdSchema = z.object({
   orderId: z.number().int().positive(),
+});
+
+export const materialIdSchema = z.object({
+  id: z.number().int().positive(),
 });
 
 export const orderArtworkSchema = z.object({
@@ -172,6 +184,14 @@ export const catalogPrintSchema = z.object({
     z.array(z.enum(["corporativo", "escolar", "operacional", "esportivo", "evento"])).min(1),
   ]),
   active: z.boolean().default(true),
+});
+
+export const catalogPieceIdSchema = z.object({
+  id: z.number().int().positive(),
+});
+
+export const catalogPrintIdSchema = z.object({
+  id: z.string().trim().min(1).max(80),
 });
 
 export const catalog = {
