@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   createMaterial,
+  deleteMaterial,
   getStockOutlook,
   listMaterials,
   listMovements,
@@ -19,9 +20,10 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { ConfirmDeleteButton } from "@/components/confirm-delete";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { usePageAccess } from "@/components/staff-session";
+import { useStaff, usePageAccess } from "@/components/staff-session";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/estoque")({ component: Estoque });
@@ -211,6 +213,7 @@ function MaterialCard({
   };
 }) {
   const qc = useQueryClient();
+  const { staff } = useStaff();
   const [name, setName] = useState(material.name);
   const [unit, setUnit] = useState(material.unit);
   const [qty, setQty] = useState(String(material.quantity));
@@ -242,6 +245,22 @@ function MaterialCard({
     },
     onError: (err) =>
       toast.error(err instanceof Error ? err.message : "Falha no ajuste."),
+  });
+
+  const remove = useMutation({
+    mutationFn: () => deleteMaterial({ data: { id: material.id } }),
+    onSuccess: async () => {
+      toast.success("Material excluído.");
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["materials"] }),
+        qc.invalidateQueries({ queryKey: ["movements"] }),
+        qc.invalidateQueries({ queryKey: ["dashboard"] }),
+        qc.invalidateQueries({ queryKey: ["stock-outlook"] }),
+        qc.invalidateQueries({ queryKey: ["catalog-admin"] }),
+      ]);
+    },
+    onError: (err) =>
+      toast.error(err instanceof Error ? err.message : "Não foi possível excluir."),
   });
 
   return (
@@ -323,9 +342,20 @@ function MaterialCard({
             <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />
             Ativo no pedido
           </label>
-          <Button type="submit" variant="navy" disabled={save.isPending}>
-            {save.isPending ? "Salvando…" : "Salvar material"}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            {staff?.role === "admin" ? (
+              <ConfirmDeleteButton
+                label="Excluir de vez"
+                confirmTitle={`Excluir ${material.name} de vez?`}
+                confirmBody="Só funciona se este material nunca entrou em nenhum pedido. Se já foi usado, desative-o em vez de excluir."
+                pending={remove.isPending}
+                onConfirm={() => remove.mutate()}
+              />
+            ) : null}
+            <Button type="submit" variant="navy" disabled={save.isPending}>
+              {save.isPending ? "Salvando…" : "Salvar material"}
+            </Button>
+          </div>
         </div>
       </form>
     </Card>

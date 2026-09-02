@@ -3,7 +3,14 @@ import { Link, createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ImagePlus, Plus, Shirt, Stamp } from "lucide-react";
 import { toast } from "sonner";
-import { getCatalogAdmin, listMaterials, saveCatalogPiece, saveCatalogPrint } from "@/lib/karisma/api";
+import {
+  deleteCatalogPiece,
+  deleteCatalogPrint,
+  getCatalogAdmin,
+  listMaterials,
+  saveCatalogPiece,
+  saveCatalogPrint,
+} from "@/lib/karisma/api";
 import {
   CATEGORY_LABEL,
   COLORS,
@@ -20,12 +27,14 @@ import { Page } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { ConfirmDeleteButton } from "@/components/confirm-delete";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { usePageAccess } from "@/components/staff-session";
 import { RECEIPT_MAX_BYTES } from "@/lib/karisma/pickup";
 import { isAllowedImageMime } from "@/lib/karisma/media";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/catalogo")({ component: Catalogo });
 
@@ -147,6 +156,7 @@ function PieceBoard({ pieces }: { pieces: AdminPiece[] }) {
         piece={current === "new" ? undefined : piece}
         materialNames={materialNames}
         onCreated={(id) => setSelected(id)}
+        onDeleted={() => setSelected(null)}
       />
     </div>
   );
@@ -156,10 +166,12 @@ function PieceForm({
   piece,
   materialNames,
   onCreated,
+  onDeleted,
 }: {
   piece?: AdminPiece;
   materialNames: string[];
   onCreated: (id: number) => void;
+  onDeleted: () => void;
 }) {
   const qc = useQueryClient();
   const [name, setName] = useState(piece?.name ?? "");
@@ -194,6 +206,17 @@ function PieceForm({
       if (!piece && result.id) onCreated(result.id);
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : "Não salvou."),
+  });
+
+  const remove = useMutation({
+    mutationFn: () => deleteCatalogPiece({ data: { id: piece!.id } }),
+    onSuccess: async () => {
+      toast.success("Peça excluída do menu.");
+      await qc.invalidateQueries({ queryKey: ["catalog"] });
+      await qc.invalidateQueries({ queryKey: ["catalog-admin"] });
+      onDeleted();
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Não foi possível excluir."),
   });
 
   function toggleColor(color: string) {
@@ -431,9 +454,19 @@ function PieceForm({
             Ativa no pedido
           </label>
         ) : null}
-        <Button type="submit" disabled={save.isPending}>
-          {piece ? "Salvar peça" : "Colocar no menu"}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="submit" disabled={save.isPending}>
+            {piece ? "Salvar peça" : "Colocar no menu"}
+          </Button>
+          {piece ? (
+            <ConfirmDeleteButton
+              confirmTitle={`Excluir ${piece.name} do menu?`}
+              confirmBody="Some da lista de pedido novo. Pedidos já lançados com esta peça continuam normais."
+              pending={remove.isPending}
+              onConfirm={() => remove.mutate()}
+            />
+          ) : null}
+        </div>
       </form>
     </Card>
   );
@@ -485,6 +518,7 @@ function PrintBoard({ prints }: { prints: AdminPrint[] }) {
         key={current}
         print={print}
         onCreated={(id) => setSelected(id)}
+        onDeleted={() => setSelected(null)}
       />
     </div>
   );
@@ -493,9 +527,11 @@ function PrintBoard({ prints }: { prints: AdminPrint[] }) {
 function PrintForm({
   print,
   onCreated,
+  onDeleted,
 }: {
   print?: AdminPrint;
   onCreated: (id: string) => void;
+  onDeleted: () => void;
 }) {
   const qc = useQueryClient();
   const locked = print?.id === "sem-estampa";
@@ -534,6 +570,17 @@ function PrintForm({
       if (!print && result.id) onCreated(result.id);
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : "Não salvou."),
+  });
+
+  const remove = useMutation({
+    mutationFn: () => deleteCatalogPrint({ data: { id: print!.id } }),
+    onSuccess: async () => {
+      toast.success("Estampa excluída do menu.");
+      await qc.invalidateQueries({ queryKey: ["catalog"] });
+      await qc.invalidateQueries({ queryKey: ["catalog-admin"] });
+      onDeleted();
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Não foi possível excluir."),
   });
 
   return (

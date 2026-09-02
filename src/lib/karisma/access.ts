@@ -41,6 +41,22 @@ export function redactOrderForRole(order: Order, role: Role): Order {
   };
 }
 
+export function removalError(input: {
+  actorId: number;
+  targetId: number;
+  targetRole: Role;
+  targetActive: boolean;
+  activeAdminCount: number;
+}): string | null {
+  if (input.actorId === input.targetId) {
+    return "Você não pode remover a si mesmo da equipe.";
+  }
+  if (input.targetActive && input.targetRole === "admin" && input.activeAdminCount <= 1) {
+    return "Não é possível remover o último administrador.";
+  }
+  return null;
+}
+
 export function deactivationError(input: {
   actorId: number;
   targetId: number;

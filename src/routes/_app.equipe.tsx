@@ -2,11 +2,12 @@ import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { inviteStaff, listStaff, setStaffActive } from "@/lib/karisma/api";
+import { inviteStaff, listStaff, removeStaff, setStaffActive } from "@/lib/karisma/api";
 import { ROLE_LABEL, ROLES, type Role } from "@/lib/karisma/types";
 import { Page } from "@/components/page";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { ConfirmDeleteButton } from "@/components/confirm-delete";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
@@ -46,6 +47,16 @@ function Equipe() {
     },
     onError: (err) =>
       toast.error(err instanceof Error ? err.message : "Não foi possível atualizar."),
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: number) => removeStaff({ data: { id } }),
+    onSuccess: async () => {
+      toast.success("Pessoa removida da equipe.");
+      await qc.invalidateQueries({ queryKey: ["staff"] });
+    },
+    onError: (err) =>
+      toast.error(err instanceof Error ? err.message : "Não foi possível remover."),
   });
 
   return (
@@ -121,15 +132,27 @@ function Equipe() {
                   </p>
                 </div>
                 {me?.id !== s.id ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={s.active ? "outline" : "navy"}
-                    disabled={toggle.isPending}
-                    onClick={() => toggle.mutate({ id: s.id, active: !s.active })}
-                  >
-                    {s.active ? "Desativar" : "Reativar"}
-                  </Button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={s.active ? "outline" : "navy"}
+                      disabled={toggle.isPending}
+                      onClick={() => toggle.mutate({ id: s.id, active: !s.active })}
+                    >
+                      {s.active ? "Desativar" : "Reativar"}
+                    </Button>
+                    {me?.role === "admin" ? (
+                      <ConfirmDeleteButton
+                        label="Remover"
+                        confirmTitle={`Remover ${s.name} da equipe?`}
+                        confirmBody="A pessoa perde o acesso na hora e some da lista. Se for só uma pausa, use Desativar em vez disso."
+                        confirmLabel="Confirmar remoção"
+                        pending={remove.isPending}
+                        onConfirm={() => remove.mutate(s.id)}
+                      />
+                    ) : null}
+                  </div>
                 ) : (
                   <span className="text-xs text-muted">você</span>
                 )}
